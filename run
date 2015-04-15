@@ -1,0 +1,445 @@
+#!/usr/bin/python
+#
+# Copyright (C) 2015 Olaf Kirch <okir@suse.de>
+#
+
+import twopence
+import susetest
+import suselog
+import time
+
+journal = None
+client = None
+
+ntp_conf		= "/etc/ntp.conf"
+ntp_pid_file		= "/var/run/ntp/ntpd.pid"
+ntp_daemon_user		= "ntp"
+ntp_daemon_group	= "ntp"
+ntp_default_server	= "pool.ntp.org"
+ntp_init_script		= None
+
+# twopence.setDebugLevel(0)
+
+##################################################################
+# Set up the test suite
+##################################################################
+def setup():
+	global client, journal
+
+	config = susetest.Config("ntp")
+
+	journal = config.journal
+
+	journal.beginGroup("setup")
+
+	client = susetest.Target(config.node("client"))
+
+	if not client.ipaddr:
+		journal.fatal("No IP address set for client");
+
+def ntp_init(node):
+	global journal, ntp_init_script
+
+	journal.beginTest(None, "locate ntp rc script")
+	for s in ['/usr/sbin/rcntp', '/usr/sbin/rcntpd', '/sbin/rcntp', '/sbin/rcntpd']:
+		if node.run("test -x " + s):
+			ntp_init_script = s
+			break
+
+	if not ntp_init_script:
+		journal.fatal("Could not find ntp init script")
+
+	ntp_restart(node)
+
+def ntp_restart(node):
+
+	global journal, ntp_init_script
+
+	if not node.run(ntp_init_script + " restart"):
+		journal.fatal("failed to start ntpd")
+
+##################################################################
+# Verify that the daemon runs in a chroot jail
+##################################################################
+def ntp_verify_user(node, expected_user, expected_group):
+
+	global journal
+	global ntp_pid_file
+
+	journal.beginTest(None, "Verify that ntpd runs as %s.%s" % (expected_user, expected_group))
+	pid = node.recvbuffer(ntp_pid_file)
+	if not buffer:
+		journal.failure("Could not get ntpd.pid file");
+		return False
+
+	status = node.run("ps -o user,group -hp %s" % pid)
+	if not status:
+		journal.failure("Could not get process status");
+		return False
+
+	words = str(status.stdout).split()
+	if len(words) != 2:
+		journal.failure("Cannot parse ps output; expected <user> <group>")
+		return False
+
+	if words[0] != expected_user or words[1] != expected_group:
+		journal.failure("NTP daemon is running as %s.%s, expected %s.%s" % \
+			(words[0], words[1], expected_user, expected_group))
+		return False
+
+	journal.success("Good: NTP daemon is running as %s.%s" % (words[0], words[1]))
+	
+	return True
+
+def ntp_verify_chroot(node, yesno):
+
+	global journal
+	global ntp_pid_file
+
+	journal.beginTest(None, "Verify that NTPD_RUN_CHROOTED=%s works as expected" % yesno)
+
+	if not node.changeSysconfigVar("ntp", "NTPD_RUN_CHROOTED", yesno):
+		return False
+
+	ntp_restart(node)
+
+	pid = node.recvbuffer(ntp_pid_file)
+	if not buffer:
+		journal.failure("Could not get ntpd.pid file");
+		return False
+
+	status = node.run("readlink /proc/%s/root" % pid)
+	if not status:
+		journal.failure("Could not get ntpd root directory");
+		return False
+
+	rootdir = str(status.stdout).strip()
+	if yesno == "yes":
+		if rootdir == "/":
+			journal.failure("ntpd daemon runs unconfined (but should be jailed)")
+			return False
+		journal.info("Good: ntpd daemon runs in chroot jail \"%s\"" % rootdir)
+	else:
+		if rootdir != "/":
+			journal.failure("ntpd daemon runs in chroot jail \"%s\" (but should be unconfined)" % rootdir)
+			return False
+		journal.info("Good: ntpd daemon runs unconfined")
+	
+	return True
+
+
+def ntp_verify_security(node):
+
+	global journal
+
+	journal.beginGroup("security", "Check daemon confinement")
+
+	# Verify that the daemon is running with reduced privileges
+	ntp_verify_user(node, ntp_daemon_user, ntp_daemon_group)
+
+	# Verify that the daemon is running with reduced privileges
+	ntp_verify_chroot(node, "no")
+	ntp_verify_chroot(node, "yes")
+
+##################################################################
+# Use an ntp command line utility to set the system's time
+# This could be either sntp or ntpdate - but it's a tricky
+# business, because those tools seem to have changed a lot
+# between SLE10, SLE11 and again SLE12.
+##################################################################
+__ntp_set_ntptime = None
+
+def ntp_set_ntptime(node, server = None, standalone_test = True):
+
+	global journal
+	global __ntp_set_ntptime
+
+	if not server:
+		server = ntp_default_server
+
+	if standalone_test:
+		journal.beginTest(None, "%s: set system time from %s" % (node.name, server))
+	else:
+		journal.info("%s: set system time from %s" % (node.name, server))
+
+	if __ntp_set_ntptime:
+		return __ntp_set_ntptime(node, server)
+	
+	if ntp_set_ntptime_sntp_sle11(node, server):
+		__ntp_set_ntptime = ntp_set_ntptime_sntp_sle11
+		return True
+
+	if ntp_set_ntptime_sntp_sle12(node, server):
+		__ntp_set_ntptime = ntp_set_ntptime_sntp_sle12
+		return True
+
+	journal.fatal("Don't know how to use sntp on this system")
+
+def ntp_set_ntptime_sntp_sle11(node, server):
+
+	global journal
+
+	if not node.run("sntp -P no -r %s" % server):
+		return False
+
+	return True
+
+def ntp_set_ntptime_sntp_sle12(node, server):
+
+	global journal
+
+	if not node.run("sntp -s %s" % server):
+		return False
+
+	return True
+
+##################################################################
+# Edit ntp.conf and add several servers.
+# Then restart ntpd.
+##################################################################
+def ntp_set_servers(node, server_list, keep_local = True):
+
+	global ntp_conf, ntp_init_script, journal
+
+	journal.beginTest(None, "Changing list of ntp servers to " + ' '.join(server_list))
+	buffer = node.recvbuffer(ntp_conf)
+	if not buffer:
+		journal.failure("Could not get ntp.conf file");
+		return False
+
+	out = []
+	for line in str(buffer).split('\n'):
+		words = line.split()
+		if len(words) >= 2 and words[0] == "server":
+			if words[1] != "127.127.1.0" or not(keep_local):
+				continue
+		out.append(line)
+
+	for server in server_list:
+		out.append("server %s iburst" % server)
+
+	# Upload the changed ntp.conf
+	if not node.sendbuffer(ntp_conf, '\n'.join(out) + "\n"):
+		journal.failure("failed to write data to ntp.conf")
+		return False
+
+	# ... and restart the server
+	ntp_restart(node)
+
+	# Need to wait a little for the restart to complete
+	time.sleep(2)
+
+	journal.success()
+	return True
+
+##################################################################
+# Verify that we were able to configure one or more servers
+# as peers, using client mode.
+##################################################################
+def ntp_verify_servers(node, ignore_local = True):
+
+	global journal
+
+	journal.beginTest(None, "Verifying that list of peers is not empty")
+	status = node.run("ntpdc -nl")
+	if not status:
+		journal.failure("ntpdc command failed")
+		return False
+	
+	output = str(status.stdout)
+
+	valid = False
+	for line in str(status.stdout).split('\n'):
+		words = line.split()
+		if len(words) >= 2 and words[0] == "client":
+			address = words[1]
+			if address == "127.127.1.0" and ignore_local:
+				continue
+
+			journal.info("found peer " + address)
+			valid = True
+
+	if not valid:
+		journal.failure("no valid peers found")
+
+	return valid
+
+##################################################################
+# Find the NTP peer that ntpd has picked for synchronizing with
+##################################################################
+def ntp_get_system_peer(node):
+
+	global journal
+	status = node.run("ntpdc -n -c sysinfo", suppressOutput = 1)
+	if not status:
+		journal.failure("ntpdc command failed")
+		return None
+	
+	output = str(status.stdout)
+
+	for line in str(status.stdout).split('\n'):
+		words = line.split(':')
+		if len(words) < 2 or words[0] != 'system peer':
+			continue
+
+		peer = words[1].strip()
+		if peer != "0.0.0.0" and peer != "127.127.1.0":
+			return peer
+	
+	return None
+
+##################################################################
+# Wait until NTP has picked a server to synch with
+##################################################################
+def ntp_wait_until_synched(node, timeout = 120):
+
+	global journal
+
+	journal.info("Waiting for NTP server to synchronize")
+	t0 = time.time()
+	t1 = t0 + timeout
+
+	while True:
+		system_peer = ntp_get_system_peer(node)
+
+		now = time.time();
+		elapsed = now - t0
+
+		ts = "%02u:%02u" % (elapsed / 60, elapsed % 60)
+		if system_peer:
+			journal.info("%s: ntp server is synched to %s" % (ts, system_peer))
+			return True
+
+		if elapsed < 20:
+			waitfor = 1
+		elif elapsed < 60:
+			waitfor = 10
+		else:
+			waitfor = 30
+
+		if now + waitfor > t1:
+			waitfor = t1 - now
+
+		if waitfor <= 0:
+			journal.info("%s: giving up" % (ts))
+			return False
+
+		journal.info("%s: ntp server still not synched; sleep for %u sec" % (ts, waitfor))
+		time.sleep(waitfor)
+
+##################################################################
+# Obtain the SUT's local time as seconds since 1970
+##################################################################
+def ntp_get_unixtime(node):
+
+	global journal
+
+	status = node.run("date +%s", suppressOutput = 1)
+	if not status:
+		journal.error("date command failed")
+		return 0
+
+	sut_time = 0
+
+	try:
+		sut_time = int(status.stdout)
+		journal.info("%s's time is %s" % (node.name, time.ctime(sut_time)))
+		return sut_time
+	except:
+		journal.error("date command returns something that's not an int")
+
+	return 0
+
+##################################################################
+# Get the clock skew between the control node and the SUT
+##################################################################
+def ntp_get_clockskew(node):
+
+	return ntp_get_unixtime(node) - time.time()
+
+def ntp_warp_clock(node, warp_seconds):
+
+	global journal
+
+	journal.beginTest(None, "warp node's clock by %d seconds" % warp_seconds)
+
+	sut_time = ntp_get_unixtime(node)
+	if sut_time == 0:
+		return False
+
+	if warp_seconds and not node.run("date -s @%u" % (sut_time + warp_seconds)):
+		journal.error("unable to set system time")
+		False
+
+	return ntp_get_unixtime(node)
+
+def ntp_test_servers(node, server_list, warp_seconds = 0):
+
+	global journal
+
+	journal.beginGroup("sync", "Synchronize against " + ", ".join(server_list))
+	if warp_seconds:
+		ntp_warp_clock(node, warp_seconds)
+
+	if not ntp_set_servers(node, server_list):
+		return False
+
+	if not ntp_verify_servers(node):
+		return False
+
+	journal.beginTest(None, "Verify that ntp is not synched")
+	if ntp_get_system_peer(node):
+		journal.warning("NTP server already synchronized")
+
+	journal.beginTest(None, "Waiting for NTP server to synchronize")
+	if not ntp_wait_until_synched(node, timeout = 600):
+		journal.failure("timed out waiting for server to synchronize")
+		return False
+
+	if warp_seconds:
+		journal.beginTest(None, "Verifying that NTP adjusted the system time")
+		now1 = ntp_get_unixtime(node)
+		ntp_set_ntptime(node, standalone_test = False)
+		now2 = ntp_get_unixtime(node)
+
+		# Allowing for some jitter, and an execution time of sntp of a few
+		# seconds, the difference between our two time samples should not
+		# exceed 15 seconds
+		if abs(now2 - now1) > 15:
+			journal.info("time delta caused by using sntp is %d seconds, which is too much" % (now2 - now1))
+			journal.failure("ntpd does not seem to have corrected the clock")
+			return False
+
+		journal.info("Good, ntpd seems to have adjusted the system time")
+
+	journal.success()
+
+def ntp_verify_timesync(node):
+
+	journal.beginGroup("base", "Check that ntpd can synchronize effectively")
+
+	# Make sure that we can set the SUT's time from a public NTP server
+	ntp_set_ntptime(node)
+
+	# Configure ntp as a client to various NTP servers,
+	# warp the clock by a few minutes back or forward.
+	# Make sure that ntpd synchronizes successfully, and
+	# that it brings the system clock back in line
+	ntp_test_servers(node, ["de.pool.ntp.org"], -300)
+	ntp_test_servers(node, ['3.asia.pool.ntp.org', '0.north-america.pool.ntp.org'], 300)
+
+
+def main():
+	setup()
+	ntp_init(client)
+
+	ntp_verify_security(client);
+	ntp_verify_timesync(client)
+
+	# TBD:
+	# Test client/server setup
+	# Test NTPD_FORCE_SYNC_ON_STARTUP
+
+	journal.writeReport()
+
+main()
