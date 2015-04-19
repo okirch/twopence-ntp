@@ -1,4 +1,8 @@
-node	client
-install	ntp
-# Need to update - there was an ugly bug
-install apparmor-profiles
+node		client
+#
+# Add the updates repo
+#
+repo		updates
+install		ntp
+# Need to update apparmor-profiles - there was an ugly bug
+install		apparmor-profiles
