@@ -40,7 +40,7 @@ def setup():
 def ntp_init(node):
 	global journal, ntp_init_script
 
-	journal.beginTest(None, "locate ntp rc script")
+	journal.beginTest("locate ntp rc script")
 	for s in ['/usr/sbin/rcntp', '/usr/sbin/rcntpd', '/sbin/rcntp', '/sbin/rcntpd']:
 		if node.run("test -x " + s):
 			ntp_init_script = s
@@ -66,7 +66,7 @@ def ntp_verify_user(node, expected_user, expected_group):
 	global journal
 	global ntp_pid_file
 
-	journal.beginTest(None, "Verify that ntpd runs as %s.%s" % (expected_user, expected_group))
+	journal.beginTest("Verify that ntpd runs as %s.%s" % (expected_user, expected_group))
 	pid = node.recvbuffer(ntp_pid_file)
 	if not buffer:
 		journal.failure("Could not get ntpd.pid file");
@@ -96,7 +96,7 @@ def ntp_verify_chroot(node, yesno):
 	global journal
 	global ntp_pid_file
 
-	journal.beginTest(None, "Verify that NTPD_RUN_CHROOTED=%s works as expected" % yesno)
+	journal.beginTest("Verify that NTPD_RUN_CHROOTED=%s works as expected" % yesno)
 
 	if not node.changeSysconfigVar("ntp", "NTPD_RUN_CHROOTED", yesno):
 		return False
@@ -158,7 +158,7 @@ def ntp_set_ntptime(node, server = None, standalone_test = True):
 		server = ntp_default_server
 
 	if standalone_test:
-		journal.beginTest(None, "%s: set system time from %s" % (node.name, server))
+		journal.beginTest("%s: set system time from %s" % (node.name, server))
 	else:
 		journal.info("%s: set system time from %s" % (node.name, server))
 
@@ -201,7 +201,7 @@ def ntp_set_servers(node, server_list, keep_local = True):
 
 	global ntp_conf, ntp_init_script, journal
 
-	journal.beginTest(None, "Changing list of ntp servers to " + ' '.join(server_list))
+	journal.beginTest("Changing list of ntp servers to " + ' '.join(server_list))
 	buffer = node.recvbuffer(ntp_conf)
 	if not buffer:
 		journal.failure("Could not get ntp.conf file");
@@ -240,7 +240,7 @@ def ntp_verify_servers(node, ignore_local = True):
 
 	global journal
 
-	journal.beginTest(None, "Verifying that list of peers is not empty")
+	journal.beginTest("Verifying that list of peers is not empty")
 	status = node.run("ntpdc -nl")
 	if not status:
 		journal.failure("ntpdc command failed")
@@ -361,7 +361,7 @@ def ntp_warp_clock(node, warp_seconds):
 
 	global journal
 
-	journal.beginTest(None, "warp node's clock by %d seconds" % warp_seconds)
+	journal.beginTest("warp node's clock by %d seconds" % warp_seconds)
 
 	sut_time = ntp_get_unixtime(node)
 	if sut_time == 0:
@@ -387,17 +387,17 @@ def ntp_test_servers(node, server_list, warp_seconds = 0):
 	if not ntp_verify_servers(node):
 		return False
 
-	journal.beginTest(None, "Verify that ntp is not synched")
+	journal.beginTest("Verify that ntp is not synched")
 	if ntp_get_system_peer(node):
 		journal.warning("NTP server already synchronized")
 
-	journal.beginTest(None, "Waiting for NTP server to synchronize")
+	journal.beginTest("Waiting for NTP server to synchronize")
 	if not ntp_wait_until_synched(node, timeout = 600):
 		journal.failure("timed out waiting for server to synchronize")
 		return False
 
 	if warp_seconds:
-		journal.beginTest(None, "Verifying that NTP adjusted the system time")
+		journal.beginTest("Verifying that NTP adjusted the system time")
 		now1 = ntp_get_unixtime(node)
 		ntp_set_ntptime(node, standalone_test = False)
 		now2 = ntp_get_unixtime(node)
