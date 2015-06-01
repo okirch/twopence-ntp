@@ -29,11 +29,9 @@ def setup():
 	config = susetest.Config("ntp")
 
 	journal = config.journal
-
 	journal.beginGroup("setup")
 
-	client = susetest.Target(config.node("client"))
-
+	client = config.target("client")
 	if not client.ipaddr:
 		journal.fatal("No IP address set for client");
 
