@@ -1,7 +1,6 @@
 node		client
-#
-# Add the updates repo
-#
+
+repository	updates
 install		ntp
 # Need to update apparmor-profiles - there was an ugly bug
 install		apparmor-profiles
