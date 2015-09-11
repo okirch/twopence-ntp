@@ -163,13 +163,17 @@ def ntp_set_ntptime(node, server = None, standalone_test = True):
 	if __ntp_set_ntptime:
 		return __ntp_set_ntptime(node, server)
 	
+	journal.info("Check if we have an old sntp version (SLE11)")
 	if ntp_set_ntptime_sntp_sle11(node, server):
 		__ntp_set_ntptime = ntp_set_ntptime_sntp_sle11
 		return True
+	journal.info("Nope, that didn't work")
 
+	journal.info("Check if we have a newer sntp version (SLE12)")
 	if ntp_set_ntptime_sntp_sle12(node, server):
 		__ntp_set_ntptime = ntp_set_ntptime_sntp_sle12
 		return True
+	journal.info("That didn't work either")
 
 	journal.fatal("Don't know how to use sntp on this system")
 
