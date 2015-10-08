@@ -278,7 +278,7 @@ def ntpdc_get_controlkey(node):
 	controlkey = None
 	for l in str(buffer).splitlines():
 		words = l.split()
-		if len(words) >= 2 && words[0] == 'controlkey':
+		if len(words) >= 2 and words[0] == 'controlkey':
 			controlkey = words[1]
 
 	if not controlkey:
