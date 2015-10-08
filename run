@@ -317,7 +317,7 @@ def ntp_verify_servers(node, ignore_local = True):
 		return False
 	
 	valid = False
-	for line in str(status.stdout).split('\n'):
+	for line in str(output).split('\n'):
 		words = line.split()
 		if len(words) >= 2 and words[0] == "client":
 			address = words[1]
@@ -342,7 +342,7 @@ def ntp_get_system_peer(node):
 	if not output:
 		return None
 	
-	for line in str(status.stdout).split('\n'):
+	for line in str(output).split('\n'):
 		words = line.split(':')
 		if len(words) < 2 or words[0] != 'system peer':
 			continue
