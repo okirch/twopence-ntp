@@ -384,9 +384,11 @@ def ntp_test_servers(node, server_list, warp_seconds = 0):
 		ntp_warp_clock(node, warp_seconds)
 
 	if not ntp_set_servers(node, server_list):
+		journal.fatal("ntp_test_servers: cannot set server list")
 		return False
 
 	if not ntp_verify_servers(node):
+		journal.fatal("ntp_test_servers: cannot verify server list")
 		return False
 
 	journal.beginTest("Verify that ntp is not synched")
