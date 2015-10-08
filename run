@@ -12,6 +12,7 @@ journal = None
 client = None
 
 ntp_conf		= "/etc/ntp.conf"
+ntp_keys		= "/etc/ntp.keys"
 ntp_pid_file		= "/var/run/ntp/ntpd.pid"
 ntp_daemon_user		= "ntp"
 ntp_daemon_group	= "ntp"
@@ -46,6 +47,13 @@ def ntp_init(node):
 
 	if not ntp_init_script:
 		journal.fatal("Could not find ntp init script")
+
+	# FIXME: We should find out whether ntpd runs in a chroot environment.
+	# If it does, the pathnames of ntp.conf and ntp.keys should be
+	# relative to that chroot jail
+
+	# Find out whether ntpdc and ntpq need a control key
+	ntpdc_get_controlkey(node)
 
 	ntp_restart(node)
 
@@ -235,6 +243,67 @@ def ntp_set_servers(node, server_list, keep_local = True):
 	return True
 
 ##################################################################
+# Run the ntpdc command
+# Take use of controlkey into account
+##################################################################
+def ntpdc_command(node, command):
+
+	script = bytearray()
+	if hasattr(node, '__ntp_controlkey') and node.__ntp_controlkey:
+		[id, type, secret] = node.__ntp_controlkey
+		journal.info("Using ntpdc with control key %s" % id)
+		script += "keytype %s\n" % type
+		script += "keyid %s\n" % id
+		script += "passwd %s\n" % secret
+
+	script += "%s\n" % command
+
+	status = node.run("ntpdc -n", stdin = script, quiet = True)
+	if not status:
+		journal.failure("ntpdc command failed")
+		return None
+	
+	return str(status.stdout)
+
+def ntpdc_get_controlkey(node):
+
+	journal.beginTest("Checking whether we need a controlkey to talk to ntpd")
+	node.__ntp_controlkey = None
+
+	buffer = node.recvbuffer(ntp_conf)
+	if not buffer:
+		journal.failure("Could not get ntp.conf file");
+		return False
+
+	controlkey = None
+	for l in str(buffer).splitlines():
+		words = l.split()
+		if words[0] == 'controlkey' and len(words) > 1:
+			controlkey = words[1]
+
+	if not controlkey:
+		journal.success("No controlkey needed")
+		return True
+
+	buffer = node.recvbuffer(ntp_keys)
+	if not buffer:
+		journal.failure("Could not get ntp.keys file");
+		return False
+
+	for l in str(buffer).splitlines():
+		words = l.split()
+		if len(words) >= 3 and words[0] == controlkey:
+			node.__ntp_controlkey = words
+			break
+	
+	if not node.__ntp_controlkey:
+		journal.failure("ntp.conf requires a controlkey, but ntp.keys does not specify one")
+		return False
+	
+	journal.success()
+
+
+##################################################################
 # Verify that we were able to configure one or more servers
 # as peers, using client mode.
 ##################################################################
@@ -243,13 +312,10 @@ def ntp_verify_servers(node, ignore_local = True):
 	global journal
 
 	journal.beginTest("Verifying that list of peers is not empty")
-	status = node.run("ntpdc -nl")
-	if not status:
-		journal.failure("ntpdc command failed")
+	output = ntpdc_command(node, "listpeers")
+	if not output:
 		return False
 	
-	output = str(status.stdout)
-
 	valid = False
 	for line in str(status.stdout).split('\n'):
 		words = line.split()
@@ -272,13 +338,10 @@ def ntp_verify_servers(node, ignore_local = True):
 def ntp_get_system_peer(node):
 
 	global journal
-	status = node.run("ntpdc -n -c sysinfo", suppressOutput = 1)
-	if not status:
-		journal.failure("ntpdc command failed")
+	output = ntpdc_command(node, "sysinfo")
+	if not output:
 		return None
 	
-	output = str(status.stdout)
-
 	for line in str(status.stdout).split('\n'):
 		words = line.split(':')
 		if len(words) < 2 or words[0] != 'system peer':
