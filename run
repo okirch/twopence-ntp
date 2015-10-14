@@ -58,6 +58,15 @@ def ntp_init(node):
 	# We need to enable mode7 for ntpdc
 	ntp_enable_mode7(node)
 
+	ntp_unit_override = '''
+# Disable restart limiting
+StartLimitInterval=0
+'''
+	if node.run("test -d /etc/systemd", quiet = True):
+		journal.beginTest("Disable systemd restart limits on ntp")
+		node.run("mkdir -p /etc/systemd/system/ntp.service.d")
+		node.sendbuffer("/etc/systemd/system/ntp.service.d/limit.conf", ntp_unit_override);
+
 	ntp_restart(node)
 
 def ntp_restart(node):
