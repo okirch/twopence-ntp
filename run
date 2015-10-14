@@ -55,6 +55,9 @@ def ntp_init(node):
 	# Find out whether ntpdc and ntpq need a control key
 	ntpdc_get_controlkey(node)
 
+	# We need to enable mode7 for ntpdc
+	ntp_enable_mode7(node)
+
 	ntp_restart(node)
 
 def ntp_restart(node):
@@ -241,6 +244,50 @@ def ntp_set_servers(node, server_list, keep_local = True):
 
 	journal.success()
 	return True
+
+##################################################################
+# Edit ntp.conf and enable mode7
+##################################################################
+def ntp_enable_mode7(node, restart = False):
+	journal.beginTest("Enabling old-style ntpdc")
+	return __ntp_enable_disable(node, "enable", "mode7", restart);
+
+def __ntp_enable_disable(node, verb, what, restart = False):
+
+	global ntp_conf, ntp_init_script
+
+	journal.info("Edit ntp.conf: %s %s" % (verb, what))
+	buffer = node.recvbuffer(ntp_conf)
+	if not buffer:
+		journal.failure("Could not get ntp.conf file");
+		return False
+
+	out = []
+	for line in str(buffer).split('\n'):
+		words = line.split()
+		if verb and len(words) >= 2 and words[1] == what:
+			line = "%s %s" % (verb, what)
+			verb = None
+		out.append(line)
+
+	if verb:
+		out.append("%s %s" % (verb, what))
+
+	# Upload the changed ntp.conf
+	if not node.sendbuffer(ntp_conf, '\n'.join(out) + "\n"):
+		journal.failure("failed to write data to ntp.conf")
+		return False
+
+	# ... and restart the server
+	if restart:
+		ntp_restart(node)
+
+		# Need to wait a little for the restart to complete
+		time.sleep(2)
+
+	journal.success()
+	return True
+
 
 ##################################################################
 # Run the ntpdc command
