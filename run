@@ -147,8 +147,10 @@ def ntp_verify_security(node):
 	ntp_verify_user(node, ntp_daemon_user, ntp_daemon_group)
 
 	# Verify that the daemon is running with reduced privileges
-	ntp_verify_chroot(node, "no")
+	# XXX: for now, make sure the service runs unconfined when we're
+	# done with this test. This works around some breakage in SLE12 SP1
 	ntp_verify_chroot(node, "yes")
+	ntp_verify_chroot(node, "no")
 
 ##################################################################
 # Use an ntp command line utility to set the system's time
