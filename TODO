@@ -1,0 +1,4 @@
+
+TODO:
+ - two-node scenario. One master synched to upstream,
+   one local client. Verify broadcast
