@@ -574,6 +574,7 @@ def main():
 	ntp_init(client)
 
 	ntp_verify_security(client);
+	ntp_verify_timesync(client)
 	ntp_verify_timesync_chroot(client)
 
 	# TBD:
