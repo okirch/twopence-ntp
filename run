@@ -556,7 +556,7 @@ def ntp_verify_timesync(node):
 	# Make sure that ntpd synchronizes successfully, and
 	# that it brings the system clock back in line
 	ntp_test_servers(node, 'pool', ["de.pool.ntp.org"], -300)
-	ntp_test_servers(node, 'server, ['3.asia.pool.ntp.org', '0.north-america.pool.ntp.org'], 300)
+	ntp_test_servers(node, 'server', ['3.asia.pool.ntp.org', '0.north-america.pool.ntp.org'], 300)
 
 def ntp_verify_timesync_chroot(node):
 
