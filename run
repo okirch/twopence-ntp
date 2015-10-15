@@ -217,8 +217,13 @@ def ntp_set_ntptime_sntp_sle12(node, server):
 ##################################################################
 # Edit ntp.conf and add several servers.
 # Then restart ntpd.
+# assoc_mode can be one of "server", "pool", "peer", "broadcast"
 ##################################################################
-def ntp_set_servers(node, server_list, keep_local = True):
+def ntp_set_servers(node, assoc_mode, server_list, keep_local = True):
+
+	assoc_type_list = [
+		'server', 'pool', 'peer', 'broadcast', 'manycastclient'
+	]
 
 	global ntp_conf, ntp_init_script, journal
 
@@ -231,13 +236,13 @@ def ntp_set_servers(node, server_list, keep_local = True):
 	out = []
 	for line in str(buffer).split('\n'):
 		words = line.split()
-		if len(words) >= 2 and words[0] == "server":
+		if len(words) >= 2 and words[0] in assoc_type_list:
 			if words[1] != "127.127.1.0" or not(keep_local):
 				continue
 		out.append(line)
 
 	for server in server_list:
-		out.append("server %s iburst" % server)
+		out.append("%s %s iburst" % (assoc_mode, server))
 
 	# Upload the changed ntp.conf
 	if not node.sendbuffer(ntp_conf, '\n'.join(out) + "\n"):
@@ -493,7 +498,7 @@ def ntp_warp_clock(node, warp_seconds):
 
 	return ntp_get_unixtime(node)
 
-def ntp_test_servers(node, server_list, warp_seconds = 0):
+def ntp_test_servers(node, assoc_mode, server_list, warp_seconds = 0):
 
 	global journal
 
@@ -501,7 +506,7 @@ def ntp_test_servers(node, server_list, warp_seconds = 0):
 	if warp_seconds:
 		ntp_warp_clock(node, warp_seconds)
 
-	if not ntp_set_servers(node, server_list):
+	if not ntp_set_servers(node, assoc_mode, server_list):
 		journal.fatal("ntp_test_servers: cannot set server list")
 		return False
 
@@ -550,8 +555,8 @@ def ntp_verify_timesync(node):
 	# warp the clock by a few minutes back or forward.
 	# Make sure that ntpd synchronizes successfully, and
 	# that it brings the system clock back in line
-	ntp_test_servers(node, ["de.pool.ntp.org"], -300)
-	ntp_test_servers(node, ['3.asia.pool.ntp.org', '0.north-america.pool.ntp.org'], 300)
+	ntp_test_servers(node, 'pool', ["de.pool.ntp.org"], -300)
+	ntp_test_servers(node, 'server, ['3.asia.pool.ntp.org', '0.north-america.pool.ntp.org'], 300)
 
 def ntp_verify_timesync_chroot(node):
 
@@ -561,7 +566,7 @@ def ntp_verify_timesync_chroot(node):
 	ntp_verify_chroot(node, "yes")
 
 	# Configure ntp as a client and ensure that we can sync
-	ntp_test_servers(node, ["de.pool.ntp.org"])
+	ntp_test_servers(node, 'pool', ["de.pool.ntp.org"])
 
 
 def main():
