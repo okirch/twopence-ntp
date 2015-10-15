@@ -77,7 +77,7 @@ def ntp_restart(node):
 		journal.fatal("failed to start ntpd")
 
 ##################################################################
-# Verify that the daemon runs in a chroot jail
+# Verify that the daemon runs as the expected user
 ##################################################################
 def ntp_verify_user(node, expected_user, expected_group):
 
@@ -86,7 +86,7 @@ def ntp_verify_user(node, expected_user, expected_group):
 
 	journal.beginTest("Verify that ntpd runs as %s.%s" % (expected_user, expected_group))
 	pid = node.recvbuffer(ntp_pid_file)
-	if not buffer:
+	if not pid:
 		journal.failure("Could not get ntpd.pid file");
 		return False
 
@@ -109,6 +109,9 @@ def ntp_verify_user(node, expected_user, expected_group):
 	
 	return True
 
+##################################################################
+# Verify that the daemon runs in a chroot jail
+##################################################################
 def ntp_verify_chroot(node, yesno):
 
 	global journal
@@ -122,7 +125,7 @@ def ntp_verify_chroot(node, yesno):
 	ntp_restart(node)
 
 	pid = node.recvbuffer(ntp_pid_file)
-	if not buffer:
+	if not pid:
 		journal.failure("Could not get ntpd.pid file");
 		return False
 
@@ -154,12 +157,6 @@ def ntp_verify_security(node):
 
 	# Verify that the daemon is running with reduced privileges
 	ntp_verify_user(node, ntp_daemon_user, ntp_daemon_group)
-
-	# Verify that the daemon is running with reduced privileges
-	# XXX: for now, make sure the service runs unconfined when we're
-	# done with this test. This works around some breakage in SLE12 SP1
-	ntp_verify_chroot(node, "yes")
-	ntp_verify_chroot(node, "no")
 
 ##################################################################
 # Use an ntp command line utility to set the system's time
@@ -520,6 +517,7 @@ def ntp_test_servers(node, server_list, warp_seconds = 0):
 	if not ntp_wait_until_synched(node, timeout = 600):
 		journal.failure("timed out waiting for server to synchronize")
 		return False
+	journal.success()
 
 	if warp_seconds:
 		journal.beginTest("Verifying that NTP adjusted the system time")
@@ -536,12 +534,14 @@ def ntp_test_servers(node, server_list, warp_seconds = 0):
 			return False
 
 		journal.info("Good, ntpd seems to have adjusted the system time")
-
-	journal.success()
+		journal.success()
 
 def ntp_verify_timesync(node):
 
-	journal.beginGroup("base", "Check that ntpd can synchronize effectively")
+	journal.beginGroup("timesync", "Check that ntpd can synchronize effectively")
+
+	# Ensure that the daemon runs unconfined
+	ntp_verify_chroot(node, "no")
 
 	# Make sure that we can set the SUT's time from a public NTP server
 	ntp_set_ntptime(node)
@@ -553,13 +553,23 @@ def ntp_verify_timesync(node):
 	ntp_test_servers(node, ["de.pool.ntp.org"], -300)
 	ntp_test_servers(node, ['3.asia.pool.ntp.org', '0.north-america.pool.ntp.org'], 300)
 
+def ntp_verify_timesync_chroot(node):
+
+	journal.beginGroup("chroot", "Check that ntpd works when chrooted")
+
+	# Ensure that the daemon runs in chroot jail
+	ntp_verify_chroot(node, "yes")
+
+	# Configure ntp as a client and ensure that we can sync
+	ntp_test_servers(node, ["de.pool.ntp.org"])
+
 
 def main():
 	setup()
 	ntp_init(client)
 
 	ntp_verify_security(client);
-	ntp_verify_timesync(client)
+	ntp_verify_timesync_chroot(client)
 
 	# TBD:
 	# Test client/server setup
