@@ -1,0 +1,16 @@
+{
+  "name": "twopence-ntp",
+  "summary": "Test suite for NTP",
+  "description": "SLEnkins test suite for NTP nertwork time protocol.",
+  "status": "ready",
+  "maintainer": ["Olaf Kirch <okirch@suse.com>"],
+  "rpm": ["twopence-ntp", "twopence-ntp-control"],
+  "arch": ["noarch"],
+  "product": "ntp",
+  "fate": null,
+  "bnc": null,
+  "updated_at": "2016-03-14 16:03:00 UTC",
+  "tags": ["slenkins"],
+  "nodes": ["client"],
+  "incompatible": []
+}
