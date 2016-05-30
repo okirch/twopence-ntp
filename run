@@ -239,9 +239,15 @@ def ntp_set_servers(node, assoc_mode, server_list, keep_local = True):
 		if len(words) >= 2 and words[0] in assoc_type_list:
 			if words[1] != "127.127.1.0" or not(keep_local):
 				continue
+		# If you can find "restrict source" then do not append the line, bsc#981828
+		if len(words) >= 2 and words[0] == "restrict" and words[1] == "source":
+                                continue
 		out.append(line)
 
 	for server in server_list:
+		# If you are using "pool" directive, then append "restrict source", bsc#981828
+		if assoc_mode == "pool":
+			out.append("restrict source")
 		out.append("%s %s iburst" % (assoc_mode, server))
 
 	# Upload the changed ntp.conf
